@@ -24,7 +24,7 @@ func (rc RetentionCleaner) Cleanup(l *list.List) {
 		}
 
 		im, _ := l.Front().Value.(Metric)
-		if im.GeneratedAt().Before(refDate) {
+		if im.GeneratedAt.Before(refDate) {
 			l.Remove(l.Front())
 		} else {
 			break

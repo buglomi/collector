@@ -2,32 +2,29 @@ package collector
 
 import "time"
 
-// IntMetric is just a arbitrary int metric storage
-type IntMetric struct {
-	Time  time.Time
-	Value int64
+// Int64MaxSampler reduces a slice of int64 to their maximum
+type Int64MaxSampler struct{}
+
+func (md Int64MaxSampler) Reduce(ms ...interface{}) interface{} {
+	var max int64
+	for _, m := range ms {
+		var c = m.(int64)
+		if c > max {
+			max = c
+		}
+	}
+	return max
 }
 
-// GeneratedAt returns the Metrics generation timestamp
-func (im IntMetric) GeneratedAt() time.Time {
-	return im.Time
-}
-
-// IntCollector collects ints
+// IntCollector collects int64s
 type IntCollector struct {
 	Run func(*IntCollector) int64
 }
 
-func NewIntCollector(runner func(*IntCollector) int64) *IntCollector {
-	return &IntCollector{
-		Run: runner,
-	}
-}
-
 // Collect runs inside a go routine
 func (ic *IntCollector) Collect() Metric {
-	return IntMetric{
-		Time:  time.Now(),
-		Value: ic.Run(ic),
+	return Metric{
+		GeneratedAt: time.Now(),
+		Value:       ic.Run(ic),
 	}
 }

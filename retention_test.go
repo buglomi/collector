@@ -14,7 +14,7 @@ func TestRetentionCleanerCleanupPartial(t *testing.T) {
 	t.Parallel()
 
 	var l = list.New()
-	var c = NewIntCollector(intCollectorTestRunner)
+	var c = &IntCollector{intCollectorTestRunner}
 	l.PushBack(c.Collect())
 	time.Sleep(time.Millisecond)
 	l.PushBack(c.Collect())
@@ -30,7 +30,7 @@ func TestRetentionCleanerCleanupComplete(t *testing.T) {
 	t.Parallel()
 
 	var l = list.New()
-	var c = NewIntCollector(intCollectorTestRunner)
+	var c = &IntCollector{intCollectorTestRunner}
 	l.PushBack(c.Collect())
 	l.PushBack(c.Collect())
 	time.Sleep(time.Millisecond * 2)

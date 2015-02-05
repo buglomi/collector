@@ -5,15 +5,16 @@
 package collector
 
 import (
+	"container/list"
 	"sync"
 	"time"
 )
-import "container/list"
 
-// Metric defines our minimum requirement for every metric: it must have a timestamp
-// The timestamp is used by RetentionCleaner to drop outdated metrics
-type Metric interface {
-	GeneratedAt() time.Time
+// Metric contain an arbitrary value and a timestamp
+type Metric struct {
+	GeneratedAt time.Time
+	Value       interface{}
+	downsampled bool
 }
 
 // Collector is a generic interface for anything which collects metrics. Metrics can be anything,
@@ -23,15 +24,23 @@ type Collector interface {
 	Collect() Metric
 }
 
+// DownSampler reduces many metrics into a single metric
+type DownSampler interface {
+	Reduce(...interface{}) interface{}
+}
+
+// MetricStorage stores metrics in a double linked list to support downsampling and easy removal
 type MetricStorage struct {
-	sync.Mutex
+	mu          *sync.Mutex
+	downSampler DownSampler
 	*list.List
 }
 
-func NewMetricStorage() *MetricStorage {
+func newMetricStorage(d DownSampler) *MetricStorage {
 	return &MetricStorage{
-		Mutex: sync.Mutex{},
-		List:  list.New(),
+		mu:          &sync.Mutex{},
+		List:        list.New(),
+		downSampler: d,
 	}
 }
 
@@ -39,41 +48,49 @@ func NewMetricStorage() *MetricStorage {
 type Agent struct {
 	// Interval defines the duration between metric collections. Applies to all registered Collectors
 	Interval time.Duration
-	// RetentionInterval defines how long metrics are kept until they are discarded.
+	// RetentionInterval defines how long metrics are kept until they are discarded. Applies to all registered Collectors
 	RetentionInterval time.Duration
 	// Collectors are executed every interval. All they do is produce metrics
 	Collectors map[string]Collector
 	// Metrics contain all generated metrics, by collector name
-	Metrics          map[string]*list.List
-	locks            map[string]sync.Mutex
+	Metrics          map[string]*MetricStorage
 	retentionCleaner RetentionCleaner
+	Compactor
 }
 
+// NewAgent initializes a new Agent with given interval & retentionInterval
 func NewAgent(interval, retentionInterval time.Duration) *Agent {
 	return &Agent{
 		Interval:          interval,
 		RetentionInterval: retentionInterval,
 		Collectors:        map[string]Collector{},
-		Metrics:           map[string]*list.List{},
-		locks:             map[string]sync.Mutex{},
-		retentionCleaner:  RetentionCleaner{rt},
+		Metrics:           map[string]*MetricStorage{},
+		retentionCleaner:  RetentionCleaner{retentionInterval},
+		Compactor: Compactor{
+			HighResolutionInterval: 0,
+			DownSamplingInterval:   0,
+		},
 	}
 }
 
-func (a *Agent) Add(name string, c Collector) {
+// Add adds a new collector to the agent, and initializes all dependencies
+func (a *Agent) Add(name string, c Collector, d DownSampler) {
 	a.Collectors[name] = c
-	a.Metrics[name] = list.New()
-	a.locks[name] = sync.Mutex{}
+	a.Metrics[name] = newMetricStorage(d)
 }
 
 func (a *Agent) process(name string) {
-	var m = a.locks[name]
-	m.Lock()
+	var s = a.Metrics[name]
+	s.mu.Lock()
 
-	a.Metrics[name].PushBack(a.Collectors[name].Collect())
-	a.retentionCleaner.Cleanup(a.Metrics[name])
+	s.PushBack(a.Collectors[name].Collect())
+	a.retentionCleaner.Cleanup(s.List)
 
-	m.Unlock()
+	if s.downSampler != nil {
+		a.Compactor.Reduce(s.List, a.Interval, s.downSampler)
+	}
+
+	s.mu.Unlock()
 }
 
 // Run executes all registered collectors every Interval, inside their own go routine
